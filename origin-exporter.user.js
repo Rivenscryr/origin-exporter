@@ -7,8 +7,8 @@
 // @match        https://*.ogame.gameforge.com/game/index.php?page=ingame&component=*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://github.com/Rivenscryr/origin-exporter/raw/main/origin-exporter.user.js
-// @downloadURL  https://github.com/Rivenscryr/origin-exporter/raw/main/origin-exporter.user.js
+// @updateURL    https://github.com/Rivenscryr/origin-exporter/raw/master/origin-exporter.user.js
+// @downloadURL  https://github.com/Rivenscryr/origin-exporter/raw/master/origin-exporter.user.js
 // ==/UserScript==
 
 (function () {

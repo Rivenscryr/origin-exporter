@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Rivenscryr/origin-exporter/docs/schema.json",
+  "title": "Origin Exporter Output",
+  "description": "JSON export format produced by the Origin Exporter userscript for OGame. Validates structural elements controlled by the exporter (top-level keys, DOM-parsed fields, bonusByType shapes). Pass-through data from OGame's API is not fully validated as the game API can change without notice.",
+  "type": "object",
+  "required": ["schemaVersion", "playerId", "playerName", "characterClassId", "officers", "researches", "species", "planets", "moons", "speciesBonuses", "bonusByType", "exportedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "description": "Output structure version. See CHANGELOG.md for changes between versions.",
+      "minimum": 1
+    },
+    "playerId": { "type": "integer", "description": "OGame player ID" },
+    "playerName": { "type": "string", "description": "Player display name" },
+    "characterClassId": {
+      "type": "integer",
+      "description": "Character class: 1=Collector, 2=General, 3=Discoverer",
+      "enum": [1, 2, 3]
+    },
+    "allianceClassId": { "type": "integer", "description": "Alliance class ID" },
+    "officers": {
+      "type": "object",
+      "required": ["commander", "admiral", "engineer", "geologist", "technocrat"],
+      "additionalProperties": false,
+      "properties": {
+        "commander": { "type": "boolean" },
+        "admiral": { "type": "boolean" },
+        "engineer": { "type": "boolean" },
+        "geologist": { "type": "boolean" },
+        "technocrat": { "type": "boolean" }
+      }
+    },
+    "researches": {
+      "type": "object",
+      "description": "Research levels keyed by technology ID (string keys, integer values)",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "species": {
+      "type": "object",
+      "required": ["values", "distribution"],
+      "additionalProperties": false,
+      "properties": {
+        "values": {
+          "type": "object",
+          "description": "Species experience and levels keyed by species ID (701-704)",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["experience", "level"],
+            "properties": {
+              "experience": { "type": "integer", "minimum": 0 },
+              "level": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "distribution": {
+          "type": "object",
+          "description": "Planet/moon ID (string) to species ID (integer) mapping. Moons have null.",
+          "additionalProperties": {
+            "type": ["integer", "null"],
+            "enum": [701, 702, 703, 704, null]
+          }
+        }
+      }
+    },
+    "planets": {
+      "type": "object",
+      "description": "Planet data keyed by planet ID (string)",
+      "additionalProperties": { "$ref": "#/$defs/planet" }
+    },
+    "moons": {
+      "type": "object",
+      "description": "Moon data keyed by moon ID (string)",
+      "additionalProperties": { "$ref": "#/$defs/moon" }
+    },
+    "speciesBonuses": { "$ref": "#/$defs/speciesBonuses" },
+    "bonusByType": { "$ref": "#/$defs/bonusByType" },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of the export"
+    }
+  },
+  "$defs": {
+    "planet": {
+      "type": "object",
+      "required": ["id", "galaxy", "system", "position", "resources", "buildings", "ships", "defenses"],
+      "properties": {
+        "id": { "type": "integer" },
+        "galaxy": { "type": "integer", "minimum": 1, "maximum": 9 },
+        "system": { "type": "integer", "minimum": 1, "maximum": 499 },
+        "position": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "siblingId": { "type": ["integer", "null"], "description": "ID of orbiting moon (if any)" },
+        "buffs": { "type": "array", "items": { "$ref": "#/$defs/buff" } },
+        "resources": { "$ref": "#/$defs/planetResources" },
+        "baseProduction": {
+          "type": "object",
+          "description": "Intrinsic base production independent of mines/buildings",
+          "properties": {
+            "metal": { "type": "number" },
+            "crystal": { "type": "number" },
+            "deuterium": { "type": "number" }
+          }
+        },
+        "production": {
+          "type": "object",
+          "description": "Actual per-hour production rates after bonuses",
+          "properties": {
+            "metal": { "type": "number" },
+            "crystal": { "type": "number" },
+            "deuterium": { "type": "number" }
+          }
+        },
+        "selectedSpeciesId": {
+          "type": ["integer", "null"],
+          "enum": [701, 702, 703, 704, null]
+        },
+        "selectedSpeciesTechnologyIds": {
+          "type": "array",
+          "description": "Active lifeform research AND building tech IDs",
+          "items": { "type": "integer" }
+        },
+        "buildings": {
+          "type": "object",
+          "description": "Building levels keyed by building ID (string)",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "ships": {
+          "type": "object",
+          "description": "Ship counts keyed by ship ID (string)",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "defenses": {
+          "type": "object",
+          "description": "Defense counts keyed by defense ID (string)",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "speciesBuildings": {
+          "type": "object",
+          "description": "Lifeform building levels keyed by tech ID (string). Inactive species buildings may have non-zero levels.",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "speciesResearches": {
+          "type": "object",
+          "description": "Lifeform research levels keyed by tech ID (string). Inactive species researches may have non-zero levels.",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "name": { "type": "string", "description": "Planet name (DOM-parsed)" },
+        "diameter": { "type": "integer", "description": "Diameter in km (DOM-parsed)" },
+        "fields": {
+          "type": "object",
+          "required": ["used", "total"],
+          "properties": {
+            "used": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "temperature": {
+          "type": "object",
+          "required": ["min", "max"],
+          "properties": {
+            "min": { "type": "integer" },
+            "max": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "moon": {
+      "type": "object",
+      "description": "Same as planet but without lifeform/temperature fields",
+      "required": ["id", "galaxy", "system", "position", "resources", "buildings", "ships", "defenses"],
+      "properties": {
+        "id": { "type": "integer" },
+        "galaxy": { "type": "integer", "minimum": 1, "maximum": 9 },
+        "system": { "type": "integer", "minimum": 1, "maximum": 499 },
+        "position": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "siblingId": { "type": ["integer", "null"], "description": "ID of parent planet" },
+        "buffs": { "type": "array", "items": { "$ref": "#/$defs/buff" } },
+        "resources": { "$ref": "#/$defs/moonResources" },
+        "production": {
+          "type": "object",
+          "properties": {
+            "metal": { "type": "number" },
+            "crystal": { "type": "number" },
+            "deuterium": { "type": "number" }
+          }
+        },
+        "buildings": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "ships": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "defenses": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "name": { "type": "string" },
+        "diameter": { "type": "integer" },
+        "fields": {
+          "type": "object",
+          "required": ["used", "total"],
+          "properties": {
+            "used": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "buff": {
+      "type": "object",
+      "required": ["rarity", "itemUuid", "name"],
+      "properties": {
+        "rarity": { "type": "string", "enum": ["common", "uncommon", "rare", "epic"] },
+        "itemUuid": { "type": "string" },
+        "name": { "type": "string", "description": "May be localized" },
+        "buffStart": { "type": ["integer", "null"], "description": "Unix timestamp" },
+        "buffEnd": { "type": ["integer", "null"], "description": "Unix timestamp, null = permanent" },
+        "effectStart": { "type": ["integer", "null"] },
+        "effectEnd": { "type": ["integer", "null"] }
+      }
+    },
+    "planetResources": {
+      "type": "object",
+      "required": ["metal", "crystal", "deuterium", "energy"],
+      "properties": {
+        "metal": { "type": "number" },
+        "crystal": { "type": "number" },
+        "deuterium": { "type": "number" },
+        "energy": { "type": "number", "description": "Negative = deficit" },
+        "population": { "type": "number" },
+        "food": { "type": "number" }
+      }
+    },
+    "moonResources": {
+      "type": "object",
+      "required": ["metal", "crystal", "deuterium", "energy"],
+      "properties": {
+        "metal": { "type": "number" },
+        "crystal": { "type": "number" },
+        "deuterium": { "type": "number" },
+        "energy": { "type": "number" }
+      }
+    },
+    "speciesBonuses": {
+      "type": "object",
+      "description": "Detailed lifeform bonus data (flattened from speciesBonuses.data). Stripped of localization/reference fields.",
+      "required": ["resources", "ships", "defenses", "costreduction", "characterclasses", "misc"],
+      "properties": {
+        "resources": { "$ref": "#/$defs/bonusCategory" },
+        "ships": { "$ref": "#/$defs/bonusCategory" },
+        "defenses": { "$ref": "#/$defs/bonusCategory" },
+        "costreduction": { "$ref": "#/$defs/bonusCategory" },
+        "characterclasses": { "$ref": "#/$defs/bonusCategory" },
+        "misc": { "$ref": "#/$defs/bonusCategory" }
+      }
+    },
+    "bonusCategory": {
+      "type": "object",
+      "description": "Entries keyed by ID (string). Each entry has totalBonus, spaceObjectBonus, technologyBonus, and optional maximum fields.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["totalBonus", "spaceObjectBonus", "technologyBonus"],
+        "properties": {
+          "totalBonus": { "type": "object", "additionalProperties": { "type": "number" } },
+          "spaceObjectBonus": {
+            "type": ["object", "array"],
+            "description": "Per-planet bonus or empty array"
+          },
+          "technologyBonus": {
+            "type": ["object", "array"],
+            "description": "Per-planet, per-tech bonus or empty array"
+          },
+          "maximumBonusFuel": { "type": ["number", "null"] },
+          "maximumBonusTime": { "type": ["number", "null"] },
+          "maximumBonusCost": { "type": ["number", "null"] },
+          "maximumBonus": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "bonusByType": {
+      "type": "object",
+      "description": "Simplified bonus totals by lifeform research type. Values may be a number, an object of {entryId: value}, or an object of {entryId: {dim: value}}. See docs/schema.md for simplification rules.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "number" },
+          { "type": "object", "additionalProperties": { "type": "number" } },
+          { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": { "type": "number" } } }
+        ]
+      }
+    }
+  }
+}

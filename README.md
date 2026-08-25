@@ -78,6 +78,29 @@ If you are building a tool that consumes this export:
 4. All numeric values are raw game values — resource amounts are integers, production rates are floats (per hour), and bonus multipliers are fractional (e.g. `0.25` = 25%).
 5. The `exportedAt` timestamp tells you when the data was captured. Resource and production values are point-in-time and will drift.
 
+## Contributing
+
+Contributions are welcome. The project is a single userscript (`origin-exporter.user.js`) with documentation in `docs/`.
+
+### Development setup
+
+1. Clone the repo.
+2. Load `origin-exporter.user.js` into your userscript manager (Tampermonkey/Violentmonkey) — point it at your local file or paste the contents.
+3. Make changes, test against OGame.
+4. Bump `@version` in the userscript header and `SCHEMA_VERSION` in the script if the output structure changes. Add an entry to [CHANGELOG.md](./CHANGELOG.md).
+
+### What to contribute
+
+- **Bug reports** — if the export fails or produces incorrect data, open an issue with the error message and (if possible) the relevant snippet of the game's API response (redact your account details).
+- **Localization fixes** — if DOM parsing breaks on a non-English game locale, open an issue with the tooltip HTML and your language.
+- **Schema documentation** — if you spot inaccuracies in [`docs/schema.md`](./docs/schema.md) or new fields in the game API that aren't documented, PRs are welcome.
+
+### Notes
+
+- The `examples/` directory is gitignored — it contains real account data for local testing and should not be committed.
+- The `LIFEFORM_TECH_TYPE` mapping is derived from the game's `serverData.xml`. If Gameforge adds new lifeform researches, this mapping needs updating.
+- Keep the userscript dependency-free — no `@require` or external libraries.
+
 ## License
 
 MIT

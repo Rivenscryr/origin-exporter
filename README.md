@@ -9,11 +9,11 @@ A userscript for [OGame](https://en.ogame.gameforge.com/) that lets players expo
    - [Violentmonkey](https://violentmonkey.github.io/) (Chrome, Firefox)
 2. Open [`origin-exporter.user.js`](./origin-exporter.user.js) and click the **Raw** button (or create a new script in your userscript manager and paste the contents).
 3. Confirm the installation when prompted.
-4. Navigate to any OGame ingame page — the Empire menu icon (top menu) will gain a hover tint. Click it to open the exporter popup.
+4. Navigate to any OGame ingame page — the Empire menu icon will gain a hover tint. Click it to open the exporter popup.
 
 ## Usage
 
-1. Click the **Empire** icon in the OGame top menu (it highlights on hover).
+1. Click the **Empire** icon in the OGame menu (it highlights on hover).
 2. In the popup, click **Export account data**.
 3. The script fetches `accountInfo` and `speciesBonuses` from the game server and parses planet/moon temperature, fields, and diameter from the current page.
 4. Once complete, use **Copy JSON** or **Download JSON** to get the data.

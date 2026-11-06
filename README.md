@@ -20,6 +20,16 @@ A userscript for [OGame](https://en.ogame.gameforge.com/) that lets players expo
 
 The export reflects the state of the account at the moment the button is clicked — resources, production, fleet, defenses, and lifeform bonuses are all point-in-time values.
 
+### Sending data to a tool
+
+Third-party tools can request the export directly, so you don't have to copy and paste it:
+
+1. On the tool's website, click its import link (e.g. "Import from OGame"). It opens the OGame lobby.
+2. Pick your server as usual. If the game is already open in another tab, the prompt appears there without a reload.
+3. A prompt shows which website is requesting your data. Check the domain, then click **Send** to open the tool with your data, or **Cancel**.
+
+Nothing is sent without your click. Closing the prompt cancels the request, and an unanswered request expires after 15 minutes.
+
 ## Output format
 
 The exported JSON is a single object. The structure is documented in [`docs/schema.md`](./docs/schema.md) and a machine-readable [JSON Schema](./docs/schema.json) is provided for validation.
@@ -77,6 +87,53 @@ If you are building a tool that consumes this export:
 3. Check `schemaVersion` and handle or reject versions you don't support. See [CHANGELOG.md](./CHANGELOG.md) for what changed between versions.
 4. All numeric values are raw game values — resource amounts are integers, production rates are floats (per hour), and bonus multipliers are fractional (e.g. `0.25` = 25%).
 5. The `exportedAt` timestamp tells you when the data was captured. Resource and production values are point-in-time and will drift.
+
+### Receiving exports directly
+
+Your tool can receive the export without the user copying anything, and without a userscript of its own. It works like an OAuth redirect without the server side:
+
+1. You link the user to OGame with your import page as the return URL.
+2. The exporter stores the request and, once the user is ingame, asks them whether to send their data to your domain.
+3. On **Send**, it opens your return URL with the export in the fragment: `https://tool.example.com/import#oe-data=…`.
+
+**The link.** URL-encode your import page and put it into the `oe-return` fragment parameter:
+
+```html
+<a href="https://lobby.ogame.gameforge.com/#oe-return=https%3A%2F%2Ftool.example.com%2Fimport">
+  Import from OGame (requires Origin Exporter)
+</a>
+```
+
+If you already know the user's server, you can link to an ingame page instead and skip the lobby, e.g. `https://s123-en.ogame.gameforge.com/game/index.php?page=ingame&component=overview#oe-return=…`.
+
+**The reader.** On your import page:
+
+```js
+async function readOriginExport() {
+    const m = location.hash.match(/[#&]oe-data=([^&]*)/);
+    if (!m) return null;
+    // Remove the data from the address bar and history, keep the rest of the fragment.
+    const rest = location.hash.slice(1).split('&')
+        .filter((part) => part && !part.startsWith('oe-data='))
+        .join('&');
+    history.replaceState(history.state, '', location.pathname + location.search + (rest ? '#' + rest : ''));
+    // base64url -> gzip -> JSON
+    const b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return JSON.parse(await new Response(stream).text());
+}
+```
+
+The result is the same object as the copied or downloaded JSON, so validate it and check `schemaVersion` as described above.
+
+**Details:**
+- The return URL must be `https`. Plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]`, for local development.
+- Any query string in the return URL is kept. If it already has a fragment (hash routing, e.g. `#/import`), the data is appended with `&`: `#/import&oe-data=…`. Read it before your router processes the fragment.
+- The data travels in the fragment, so it is not sent to your server or written to its access logs. Read it and remove it early, before analytics or other scripts on the page record the full URL.
+- A pending request expires after 15 minutes, and a newer request replaces an older one.
+- The payload is gzip-compressed, typically tens of kB. Exports that would exceed about 1.9 MB are refused, and the user is told to use Copy or Download instead.
+- The data is supplied by the user's browser and isn't signed, so treat it like a pasted export. Keep the paste-JSON import as a fallback for users without the userscript or with an older version.
 
 ## Contributing
 

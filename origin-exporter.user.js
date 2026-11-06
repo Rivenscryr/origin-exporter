@@ -1,12 +1,16 @@
 // ==UserScript==
 // @name         Origin Exporter
 // @namespace    https://github.com/Rivenscryr/origin-exporter
-// @version      1.1.0
-// @description  Adds an export button to the OGame Empire menu that fetches account data, parses planet info from the DOM, and lets you copy/download a combined JSON.
+// @version      1.2.0
+// @description  Adds an export button to the OGame Empire menu that fetches account data, parses planet info from the DOM, and lets you copy/download a combined JSON or send it to a third-party tool that requested it.
 // @author       RiV- (Rivenscryr)
+// @match        https://lobby.ogame.gameforge.com/*
 // @match        https://*.ogame.gameforge.com/game/index.php?page=ingame&component=*
-// @grant        none
-// @run-at       document-idle
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
+// @run-at       document-start
 // @updateURL    https://github.com/Rivenscryr/origin-exporter/raw/master/origin-exporter.user.js
 // @downloadURL  https://github.com/Rivenscryr/origin-exporter/raw/master/origin-exporter.user.js
 // ==/UserScript==
@@ -21,6 +25,21 @@
     // Bumped when the output structure changes in a way that consumers need to
     // handle. See docs/schema.md and CHANGELOG.md for details.
     const SCHEMA_VERSION = 1;
+
+    // Return-URL handshake: a third-party tool links to the lobby (or any
+    // ingame page) with #oe-return=<url>. The request is kept in GM storage,
+    // which is shared between the lobby and all game servers, until the user
+    // sends or cancels it on an ingame page. See README.md for the tool side.
+    const PENDING_KEY = 'pendingRequest';
+    const PENDING_TTL = 15 * 60 * 1000;
+    // Plain http is only accepted for local tool development.
+    const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+    // Chrome caps URLs at 2 MB; keep some headroom for the return URL itself.
+    const MAX_PAYLOAD_LENGTH = 1900000;
+
+    // The popup currently shown: { close, request }. `request` is set when
+    // the popup is a send prompt for a pending request.
+    let activePopup = null;
 
     function injectStyles() {
         if (document.getElementById(STYLE_ID)) return;
@@ -135,6 +154,26 @@
                 box-sizing: border-box;
                 resize: vertical;
                 display: none;
+            }
+            #${POPUP_ID} .oe-request {
+                margin: 0 0 12px 0;
+                padding: 10px 12px;
+                background: #0a0a14;
+                border: 1px solid #ffd700;
+                border-radius: 4px;
+            }
+            #${POPUP_ID} .oe-request-host {
+                color: #ffd700;
+                font-size: 16px;
+                font-weight: bold;
+                word-break: break-all;
+            }
+            #${POPUP_ID} .oe-request-url {
+                margin-top: 4px;
+                color: #a0a0a0;
+                font-family: monospace;
+                font-size: 11px;
+                word-break: break-all;
             }
         `;
         document.head.appendChild(style);
@@ -539,8 +578,90 @@
         }
     }
 
-    function openPopup() {
-        if (document.getElementById(OVERLAY_ID)) return;
+    function getHashParam(name) {
+        const m = location.hash.match(new RegExp(`[#&]${name}=([^&]*)`));
+        return m ? m[1] : null;
+    }
+
+    // Remove only our parameter, so the fragment of single-page apps (the
+    // lobby, hash-routed tools) is left intact.
+    function removeHashParam(name) {
+        const rest = location.hash.slice(1).split('&')
+            .filter((part) => part && !part.startsWith(`${name}=`))
+            .join('&');
+        history.replaceState(history.state, '', location.pathname + location.search + (rest ? `#${rest}` : ''));
+    }
+
+    function parseReturnUrl(value) {
+        let url;
+        try {
+            url = new URL(value);
+        } catch (_) {
+            return null;
+        }
+        if (url.protocol === 'https:') return url;
+        if (url.protocol === 'http:' && LOCAL_HOSTS.includes(url.hostname)) return url;
+        return null;
+    }
+
+    // Runs on every matched page before anything else, so the fragment is
+    // read before the lobby's single-page app can rewrite it.
+    function captureRequest() {
+        const raw = getHashParam('oe-return');
+        if (raw === null) return;
+        removeHashParam('oe-return');
+        let decoded;
+        try {
+            decoded = decodeURIComponent(raw);
+        } catch (_) {
+            return;
+        }
+        const url = parseReturnUrl(decoded);
+        if (url) GM_setValue(PENDING_KEY, { returnUrl: url.href, at: Date.now() });
+    }
+
+    function getPendingRequest() {
+        const req = GM_getValue(PENDING_KEY, null);
+        if (!req) return null;
+        if (Date.now() - req.at > PENDING_TTL || !parseReturnUrl(req.returnUrl)) {
+            GM_deleteValue(PENDING_KEY);
+            return null;
+        }
+        return req;
+    }
+
+    // Delete the pending request only if it is still `req` — another tool may
+    // have replaced it in the meantime.
+    function clearPendingRequest(req) {
+        const current = GM_getValue(PENDING_KEY, null);
+        if (current && current.at === req.at && current.returnUrl === req.returnUrl) {
+            GM_deleteValue(PENDING_KEY);
+        }
+    }
+
+    // JSON -> gzip -> base64url, so the export fits into a URL fragment.
+    async function encodePayload(obj) {
+        const stream = new Blob([JSON.stringify(obj)]).stream()
+            .pipeThrough(new CompressionStream('gzip'));
+        const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    // The payload goes into the fragment so it never reaches the tool's
+    // server. An existing fragment (hash routing) is kept and extended.
+    function buildSendUrl(returnUrl, payload) {
+        const url = new URL(returnUrl);
+        const param = `oe-data=${payload}`;
+        url.hash = url.hash ? `${url.hash.slice(1)}&${param}` : param;
+        return url.href;
+    }
+
+    function createPopup(bodyHtml, request, onClose) {
+        if (activePopup) activePopup.close();
 
         const overlay = document.createElement('div');
         overlay.id = OVERLAY_ID;
@@ -550,6 +671,118 @@
         popup.innerHTML = `
             <button class="oe-close" title="Close">&times;</button>
             <h2>Origin Exporter</h2>
+            ${bodyHtml}
+        `;
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+
+        const handle = { close: closePopup, request };
+
+        function onKeydown(e) {
+            if (e.key === 'Escape') closePopup();
+        }
+
+        function closePopup() {
+            if (!overlay.isConnected) return;
+            overlay.remove();
+            document.removeEventListener('keydown', onKeydown);
+            if (activePopup === handle) activePopup = null;
+            if (onClose) onClose();
+        }
+
+        popup.querySelector('.oe-close').addEventListener('click', closePopup);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closePopup();
+        });
+        document.addEventListener('keydown', onKeydown);
+
+        activePopup = handle;
+        return { popup, close: closePopup };
+    }
+
+    // Send prompt for a pending request. The export is prepared as soon as
+    // the prompt opens, but only leaves the page when the user clicks Send.
+    // Closing the prompt in any way cancels the request.
+    function openRequestPopup(req) {
+        const target = new URL(req.returnUrl);
+        const { popup, close } = createPopup(`
+            <p class="oe-desc">A website is requesting your account data:</p>
+            <div class="oe-request">
+                <div class="oe-request-host"></div>
+                <div class="oe-request-url"></div>
+            </div>
+            <p class="oe-desc">
+                Only send it if you started this from that website and trust it. The export
+                contains your planets, moons, resources, fleet, defenses, research and
+                lifeform data. Nothing is sent until you click Send.
+            </p>
+            <div class="oe-actions">
+                <button class="oe-primary" id="oe-send-btn" disabled>Preparing...</button>
+                <button id="oe-cancel-btn">Cancel</button>
+            </div>
+            <div class="oe-status" id="oe-status"></div>
+        `, req, () => clearPendingRequest(req));
+
+        // The URL comes from an arbitrary website, so never insert it as HTML.
+        popup.querySelector('.oe-request-host').textContent = target.host;
+        popup.querySelector('.oe-request-url').textContent = target.href;
+
+        const statusEl = popup.querySelector('#oe-status');
+        const sendBtn = popup.querySelector('#oe-send-btn');
+        const cancelBtn = popup.querySelector('#oe-cancel-btn');
+
+        let payload = null;
+
+        async function prepare() {
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Preparing...';
+            try {
+                const data = await exportData(statusEl);
+                statusEl.className = 'oe-status';
+                statusEl.textContent = 'Compressing...';
+                const encoded = await encodePayload(data);
+                if (encoded.length > MAX_PAYLOAD_LENGTH) {
+                    throw new Error(`export is too large to send via URL (${Math.round(encoded.length / 1024)} kB). Use Copy or Download from the Empire menu instead.`);
+                }
+                payload = encoded;
+                statusEl.className = 'oe-status success';
+                statusEl.textContent = `Ready to send (${Math.round(payload.length / 1024)} kB).`;
+                sendBtn.textContent = `Send to ${target.host}`;
+            } catch (err) {
+                statusEl.className = 'oe-status error';
+                statusEl.textContent = 'Error: ' + (err && err.message ? err.message : err);
+                sendBtn.textContent = 'Retry export';
+                console.error('[Origin Exporter]', err);
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        sendBtn.addEventListener('click', () => {
+            if (!payload) {
+                prepare();
+                return;
+            }
+            // Opened synchronously inside the click handler, so popup
+            // blockers treat it as user-initiated.
+            window.open(buildSendUrl(req.returnUrl, payload), '_blank', 'noopener');
+            clearPendingRequest(req);
+            payload = null;
+            sendBtn.disabled = true;
+            cancelBtn.textContent = 'Close';
+            statusEl.className = 'oe-status success';
+            statusEl.textContent = `Sent to ${target.host} in a new tab.`;
+        });
+
+        cancelBtn.addEventListener('click', close);
+
+        prepare();
+    }
+
+    function openPopup() {
+        if (activePopup) return;
+
+        const { popup } = createPopup(`
             <p class="oe-desc">
                 Exports your OGame account into a single JSON document. Uses the
                 <code>accountInfo</code> endpoint as the base, merges in lifeform bonus data
@@ -563,33 +796,15 @@
             </div>
             <div class="oe-status" id="oe-status"></div>
             <textarea id="origin-exporter-output" readonly></textarea>
-        `;
-        overlay.appendChild(popup);
-        document.body.appendChild(overlay);
+        `);
 
         const statusEl = popup.querySelector('#oe-status');
         const exportBtn = popup.querySelector('#oe-export-btn');
         const copyBtn = popup.querySelector('#oe-copy-btn');
         const downloadBtn = popup.querySelector('#oe-download-btn');
-        const closeBtn = popup.querySelector('.oe-close');
         const outputTa = popup.querySelector('#origin-exporter-output');
 
         let exportedData = null;
-
-        function closePopup() {
-            document.body.removeChild(overlay);
-        }
-
-        closeBtn.addEventListener('click', closePopup);
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) closePopup();
-        });
-        document.addEventListener('keydown', function esc(e) {
-            if (e.key === 'Escape') {
-                closePopup();
-                document.removeEventListener('keydown', esc);
-            }
-        });
 
         exportBtn.addEventListener('click', async () => {
             exportBtn.disabled = true;
@@ -641,7 +856,29 @@
             observer.observe(document.body, { childList: true, subtree: true });
             setTimeout(() => observer.disconnect(), 15000);
         }
+
+        const req = getPendingRequest();
+        if (req) openRequestPopup(req);
+
+        // Requests captured in another tab (e.g. the lobby opened from a tool
+        // while the game is already open) show up here without a reload, and
+        // prompts close everywhere once one tab sends or cancels.
+        if (typeof GM_addValueChangeListener === 'function') {
+            GM_addValueChangeListener(PENDING_KEY, (name, oldValue, newValue, remote) => {
+                if (!remote) return;
+                if (newValue) {
+                    const pending = getPendingRequest();
+                    if (pending) openRequestPopup(pending);
+                } else if (activePopup && activePopup.request) {
+                    activePopup.close();
+                }
+            });
+        }
     }
+
+    captureRequest();
+    // The lobby only hands the request over to the game servers.
+    if (location.hostname === 'lobby.ogame.gameforge.com') return;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

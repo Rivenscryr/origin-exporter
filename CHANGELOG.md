@@ -2,6 +2,19 @@
 
 All notable changes to the output format will be documented here. The `schemaVersion` field in the export is bumped when the structure changes in a way that consumers need to handle.
 
+## [1.2.0] - 2026-11-04
+
+The export structure is unchanged; `schemaVersion` stays `1`.
+
+### Added
+- Return-URL handshake for third-party tools. A tool links to the lobby (or an ingame page) with `#oe-return=<url>`. After the user confirms an ingame prompt, the export is sent to that URL as `#oe-data=<gzip + base64url JSON>`. See "Receiving exports directly" in the README.
+- The send prompt also appears in game tabs that are already open, and closes in all tabs once the request is sent or cancelled.
+
+### Changed
+- The script now also runs on `lobby.ogame.gameforge.com`, where it only captures the request.
+- Runs at `document-start` so the request is read before the lobby rewrites the URL.
+- Uses `GM_setValue`/`GM_getValue`/`GM_deleteValue`/`GM_addValueChangeListener` (previously `@grant none`) to keep the pending request across the lobby and game servers. The script therefore runs in the userscript manager's sandbox.
+
 ## [1.1.0] - 2026-08-25
 
 ### Changed
